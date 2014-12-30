@@ -156,13 +156,13 @@ static int wtp_addr_compare(struct wtp *a, struct wtp *b)
 
 	switch (a->addr.ss_family) {
 	case AF_INET:
-		if (SOCK_ADDR_CMP(&a->addr, &b->addr, sockaddr_in, sin_addr) != 0)
-			return 0;
+		if ((r = SOCK_ADDR_CMP(&a->addr, &b->addr, sockaddr_in, sin_addr)) != 0)
+			return r;
 		return SOCK_PORT_CMP(&a->addr, &b->addr, sockaddr_in, sin_port);
 
 	case AF_INET6:
-		if (SOCK_ADDR_CMP(&a->addr, &b->addr, sockaddr_in6, sin6_addr) != 0)
-			return 0;
+		if ((r = SOCK_ADDR_CMP(&a->addr, &b->addr, sockaddr_in6, sin6_addr)) != 0)
+			return r;
 		return SOCK_PORT_CMP(&a->addr, &b->addr, sockaddr_in6, sin6_port);
 	}
 
