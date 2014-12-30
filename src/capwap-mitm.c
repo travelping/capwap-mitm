@@ -88,6 +88,13 @@ struct capwap_port {
 	ev_io listen_ev;
 };
 
+struct buffer_q {
+	SIMPLEQ_ENTRY(buffer_q) entry;
+
+	ssize_t buffer_len;
+	unsigned char buffer[];
+};
+
 struct dtls_session {
 	int fd;
 
@@ -98,6 +105,8 @@ struct dtls_session {
 
 	int handshake_done;
 	gnutls_session_t session;
+
+	SIMPLEQ_HEAD(plain_q, buffer_q) plain_q;
 
 	const unsigned char *buffer;
 	ssize_t buffer_len;
@@ -425,8 +434,20 @@ static void dtls_forward(struct dtls_session *recv, struct dtls_session *send_s,
 				return;
 			}
 		}
-		if (ret == GNUTLS_E_SUCCESS)
+		if (ret == GNUTLS_E_SUCCESS) {
 			recv->handshake_done = 1;
+
+			while (!SIMPLEQ_EMPTY(&recv->plain_q)) {
+				struct buffer_q *e = SIMPLEQ_FIRST(&recv->plain_q);
+
+				debug("dequeue buffer %p on %p", e, recv);
+				ret = gnutls_record_send(recv->session, &e->buffer, e->buffer_len);
+				debug("GnuTLS send: %d", ret);
+
+				SIMPLEQ_REMOVE_HEAD(&recv->plain_q, e, entry);
+				free(e);
+			}
+		}
 	} else {
 		unsigned char sequence[8];
 		unsigned char plain_text[MAX_BUFFER];
@@ -456,8 +477,19 @@ static void dtls_forward(struct dtls_session *recv, struct dtls_session *send_s,
 		adjust_control_ips(plain_text, ret);
 
 		debug("DTLS record send on session %p, fd %d", send_s, send_s->fd);
-		ret = gnutls_record_send(send_s->session, plain_text, ret);
-		debug("GnuTLS send: %d", ret);
+		if (!send_s->handshake_done) {
+			struct buffer_q *e;
+
+			e = calloc(1, sizeof(struct buffer_q) + ret);
+			e->buffer_len = ret;
+			memcpy(&e->buffer, plain_text, ret);
+
+			debug("enqueue buffer %p on %p", e, send_s);
+			SIMPLEQ_INSERT_TAIL(&send_s->plain_q, e, entry);
+		} else {
+			ret = gnutls_record_send(send_s->session, plain_text, ret);
+			debug("GnuTLS send: %d", ret);
+		}
 	}
 }
 
@@ -486,6 +518,9 @@ static void capwap_server_in(EV_P_ struct capwap_port *capwap_port, unsigned cha
 		wtp->server.fd = capwap_port->listen_fd;
 		wtp->server.peer_addrlen = addrlen;
 		memcpy(&wtp->server.peer_addr, addr, addrlen);
+
+		SIMPLEQ_INIT(&wtp->server.plain_q);
+		SIMPLEQ_INIT(&wtp->client.plain_q);
 
 		ev_init(&wtp->timeout, wtp_timeout_cb);
 		wtp->timeout.repeat = 120.;
