@@ -422,6 +422,9 @@ static void dtls_forward(struct dtls_session *recv, struct dtls_session *send_s,
 	recv->buffer_len = len;
 
 	if (!recv->handshake_done) {
+		int try_it_again = 1;
+
+	again:
 		do {
 			ret = gnutls_handshake(recv->session);
 			debug("DTLS handshake on session %p, fd %d, got %d", recv, recv->fd, ret);
@@ -433,6 +436,11 @@ static void dtls_forward(struct dtls_session *recv, struct dtls_session *send_s,
 				gnutls_deinit(recv->session);
 				return;
 			}
+			else if (try_it_again) {
+				try_it_again = 0;
+				goto again;
+			}
+
 		}
 		if (ret == GNUTLS_E_SUCCESS) {
 			recv->handshake_done = 1;
