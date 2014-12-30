@@ -272,6 +272,17 @@ static void capwap_dump(struct sockaddr *src, struct sockaddr *dst, const unsign
 
 }
 
+static void remove_wtp(EV_P_ struct wtp *wtp)
+{
+	ev_timer_stop (EV_A_ &wtp->timeout);
+	ev_io_stop (EV_A_ &wtp->client_ev);
+	if (wtp->server.fd)
+		close(wtp->server.fd);
+
+	RB_REMOVE(wtp_tree, &wtp_tree, wtp);
+	free(wtp);
+}
+
 static void capwap_server_in(EV_P_ struct capwap_port *capwap_port, unsigned char *buffer, ssize_t len, struct sockaddr *addr, socklen_t addrlen);
 static void capwap_fwd(struct wtp *wtp, unsigned char *buffer, ssize_t len);
 
@@ -288,12 +299,17 @@ static void capwap_server_cb(EV_P_ ev_io *ev, int revents)
 	do {
 		r = recvfrom(ev->fd, buffer, sizeof(buffer), MSG_DONTWAIT, (struct sockaddr *)&addr, &addrlen);
 		if (r < 0) {
+			struct wtp *wtp;
+
 			if (errno == EAGAIN)
 				break;
 			else if (errno == EINTR)
 				continue;
 
 			debug("capwap read error: %m");
+			if ((wtp = RB_FIND(wtp_tree, &wtp_tree, (struct wtp *)&addr)))
+				remove_wtp(EV_A_ wtp);
+
 			return;
 		} else
 			capwap_server_in(EV_A_ capwap_port, buffer, r, (struct sockaddr *)&addr, addrlen);
@@ -305,14 +321,7 @@ static void wtp_timeout_cb(EV_P_ ev_timer *w, int revents)
 	struct wtp *wtp = container_of(w, struct wtp, timeout);
 
 	debug("got timeout for WTP at %p", wtp);
-
-	ev_timer_stop (EV_A_ w);
-	ev_io_stop (EV_A_ &wtp->client_ev);
-	if (wtp->server.fd)
-		close(wtp->server.fd);
-
-	RB_REMOVE(wtp_tree, &wtp_tree, wtp);
-	free(wtp);
+	remove_wtp(EV_A_ wtp);
 }
 
 static void capwap_client_cb(EV_P_ ev_io *ev, int revents)
