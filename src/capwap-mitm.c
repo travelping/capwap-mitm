@@ -75,7 +75,8 @@ pcap_dumper_t *dumper = NULL;
 gnutls_certificate_credentials_t x509_server_cred;
 gnutls_certificate_credentials_t x509_client_cred;
 gnutls_priority_t priority_cache;
-gnutls_dh_params_t dh_params;
+gnutls_dh_params_t dh_server_params;
+gnutls_dh_params_t dh_client_params;
 gnutls_datum_t cookie_key;
 
 pcap_t *pcap;
@@ -567,6 +568,7 @@ static void capwap_server_in(EV_P_ struct capwap_port *capwap_port, unsigned cha
 				gnutls_init(&c->session, GNUTLS_CLIENT | GNUTLS_DATAGRAM | GNUTLS_NONBLOCK);
 				gnutls_priority_set(c->session, priority_cache);
 				gnutls_credentials_set(c->session, GNUTLS_CRD_CERTIFICATE, x509_client_cred);
+				gnutls_dh_set_prime_bits(c->session, 512);
 
 				gnutls_dtls_set_mtu(c->session, 1500);
 
@@ -687,6 +689,12 @@ static int dtls_pull_timeout_func(gnutls_transport_ptr_t p, unsigned int ms)
                 return 1;        /* data available */
 
 	return 0;                /* timeout */
+}
+
+static int dummy_certificate_verify_function(gnutls_session_t session)
+{
+	/* accept anything */
+	return 0;
 }
 
 static void bind_capwap(struct capwap_port *capwap_port)
@@ -885,6 +893,8 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
+	gnutls_certificate_set_verify_function(x509_server_cred, dummy_certificate_verify_function);
+
 	if (access(dtls_client_keyfile, R_OK) < 0)
 		dtls_client_keyfile = dtls_client_certfile;
 
@@ -897,18 +907,28 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-        int bits = gnutls_sec_param_to_pk_bits(GNUTLS_PK_DH, GNUTLS_SEC_PARAM_LEGACY);
+        int bits = gnutls_sec_param_to_pk_bits(GNUTLS_PK_DH, GNUTLS_SEC_PARAM_INSECURE);
         /* Generate Diffie-Hellman parameters - for use with DHE
          * kx algorithms. When short bit length is used, it might
          * be wise to regenerate parameters often.
          */
-        gnutls_dh_params_init(&dh_params);
-        gnutls_dh_params_generate2(dh_params, bits);
-	gnutls_certificate_set_dh_params(x509_server_cred, dh_params);
-	gnutls_certificate_set_dh_params(x509_client_cred, dh_params);
+	gnutls_dh_params_init(&dh_client_params);
+	gnutls_dh_params_generate2(dh_client_params, bits);
+	gnutls_certificate_set_dh_params(x509_client_cred, dh_client_params);
 
+	bits = gnutls_sec_param_to_pk_bits(GNUTLS_PK_DH, GNUTLS_SEC_PARAM_LEGACY);
+	gnutls_dh_params_init(&dh_server_params);
+	gnutls_dh_params_generate2(dh_server_params, bits);
+	gnutls_certificate_set_dh_params(x509_server_cred, dh_server_params);
+
+
+#if GNUTLS_VERSION_NUMBER > 0x0302ff
 	gnutls_priority_init(&priority_cache,
-			     "PERFORMANCE:-VERS-TLS-ALL:+VERS-DTLS1.0:%SERVER_PRECEDENCE", NULL);
+			     "LEGACY:-VERS-TLS-ALL:+VERS-DTLS1.0:%SERVER_PRECEDENCE", NULL);
+#else
+	gnutls_priority_init(&priority_cache,
+			     "NORMAL:-VERS-TLS-ALL:+VERS-DTLS1.0:%SERVER_PRECEDENCE", NULL);
+#endif
 	gnutls_key_generate(&cookie_key, GNUTLS_COOKIE_KEY_SIZE);
 
 
