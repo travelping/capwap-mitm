@@ -558,19 +558,21 @@ static void capwap_server_in(EV_P_ struct capwap_port *capwap_port, unsigned cha
 				/* prestate is only used to cary to write seq number forward, the buffer will be processed again in dtls_forward ! */
 
 				gnutls_dtls_prestate_set(s->session, &prestate);
-				gnutls_dtls_set_mtu(s->session, 1500);
+				gnutls_dtls_set_mtu(s->session, 1396);
 
 				gnutls_transport_set_ptr(s->session, s);
 				gnutls_transport_set_push_function(s->session, dtls_push_func);
 				gnutls_transport_set_pull_function(s->session, dtls_pull_func);
 				gnutls_transport_set_pull_timeout_function(s->session, dtls_pull_timeout_func);
 
+				gnutls_certificate_server_set_request(s->session, GNUTLS_CERT_REQUEST);
+
 				gnutls_init(&c->session, GNUTLS_CLIENT | GNUTLS_DATAGRAM | GNUTLS_NONBLOCK);
 				gnutls_priority_set(c->session, priority_cache);
 				gnutls_credentials_set(c->session, GNUTLS_CRD_CERTIFICATE, x509_client_cred);
 				gnutls_dh_set_prime_bits(c->session, 512);
 
-				gnutls_dtls_set_mtu(c->session, 1500);
+				gnutls_dtls_set_mtu(c->session, 1396);
 
 				gnutls_transport_set_ptr(c->session, c);
 				gnutls_transport_set_push_function(c->session, dtls_push_func);
